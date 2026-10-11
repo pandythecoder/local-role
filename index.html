@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Oliver Animation Engine</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      height: 100vh;
+      font-family: sans-serif;
+      background: #111;
+      color: #eee;
+    }
+
+    /* Left: canvas area */
+    #left-panel {
+      flex: 3;
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      box-sizing: border-box;
+    }
+
+    #toolbar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    #toolbar button, #toolbar select, #toolbar input {
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
+      padding: 5px 10px;
+    }
+
+    #canvas-wrapper {
+      flex: 1;
+      border: 1px solid #444;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    canvas {
+      background: #222;
+    }
+
+    /* Right: timeline + layers */
+    #right-panel {
+      flex: 2;
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      box-sizing: border-box;
+      border-left: 1px solid #333;
+    }
+
+    #layers {
+      margin-bottom: 10px;
+    }
+
+    #layers h2, #timeline h2 {
+      margin: 0 0 5px 0;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    #layer-list {
+      border: 1px solid #444;
+      padding: 5px;
+      min-height: 60px;
+      background: #181818;
+    }
+
+    .layer-item {
+      padding: 4px 6px;
+      margin-bottom: 4px;
+      background: #222;
+      border: 1px solid #555;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .layer-item.active {
+      background: #3a6;
+      border-color: #6f9;
+    }
+
+    #timeline {
+      flex: 1;
+      border: 1px solid #444;
+      background: #181818;
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #timeline-controls {
+      padding: 5px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #timeline-controls button {
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+
+    #frames {
+      flex: 1;
+      display: flex;
+      overflow-x: auto;
+      padding: 5px;
+      gap: 4px;
+    }
+
+    .frame {
+      width: 24px;
+      height: 40px;
+      border: 1px solid #555;
+      background: #222;
+      font-size: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .frame.active {
+      background: #36a;
+      border-color: #6af;
+    }
+  </style>
+</head>
+<body>
+  <!-- LEFT: Canvas + tools -->
+  <div id="left-panel">
+    <div id="toolbar">
+      <button id="brush-tool">Brush</button>
+      <button id="erase-tool">Erase</button>
+      <label>
+        Size:
+        <input type="range" id="brush-size" min="1" max="40" value="8" />
+      </label>
+      <label>
+        Color:
+        <input type="color" id="brush-color" value="#ffffff" />
+      </label>
+    </div>
+
+    <div id="canvas-wrapper">
+      <canvas id="anim-canvas" width="800" height="450"></canvas>
+    </div>
+  </div>
+
+  <!-- RIGHT: Layers + timeline -->
+  <div id="right-panel">
+    <div id="layers">
+      <h2>Layers</h2>
+      <div id="layer-list">
+        <!-- Layers will be added here by JS -->
+      </div>
+      <button id="add-layer">+ Add Layer</button>
+    </div>
+
+    <div id="timeline">
+      <div id="timeline-controls">
+        <button id="add-frame">+ Frame</button>
+        <button id="play">Play</button>
+        <button id="stop">Stop</button>
+        <span>FPS:
+          <input type="number" id="fps" value="12" min="1" max="60" style="width:50px;" />
+        </span>
+      </div>
+      <div id="frames">
+        <!-- Frames will be added here by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== BASIC STATE =====
+    const canvas = document.getElementById('anim-canvas');
+    const ctx = canvas.getContext('2d');
+
+    let currentTool = 'brush';
+    let drawing = false;
+    let brushSize = 8;
+    let brushColor = '#ffffff';
+
+    let layers = [];
+    let activeLayerIndex = 0;
+
+    let frames = [];
+    let activeFrameIndex = 0;
+    let playing = false;
+    let playInterval = null;
+
+    // Each frame: { layers: [ImageData, ...] }
+
+    // ===== INIT =====
+    function init() {
+      addLayer();
+      addFrame();
+      renderUI();
+      clearCanvas();
+    }
+
+    // ===== LAYERS =====
+    function addLayer() {
+      const layer = { name: 'Layer ' + (layers.length + 1) };
+      layers.push(layer);
+      activeLayerIndex = layers.length - 1;
+      renderLayers();
+    }
+
+    function renderLayers() {
+      const list = document.getElementById('layer-list');
+      list.innerHTML = '';
+      layers.forEach((layer, i) => {
+        const div = document.createElement('div');
+        div.className = 'layer-item' + (i === activeLayerIndex ? ' active' : '');
+        div.textContent = layer.name;
+        div.onclick = () => {
+          activeLayerIndex = i;
+          renderLayers();
+        };
+        list.appendChild(div);
+      });
+    }
+
+    // ===== FRAMES =====
+    function addFrame() {
+      const frame = {
+        layersData: layers.map(() => null) // one ImageData per layer
+      };
+      frames.push(frame);
+      activeFrameIndex = frames.length - 1;
+      renderFrames();
+      loadFrameToCanvas();
+    }
+
+    function renderFrames() {
+      const framesDiv = document.getElementById('frames');
+      framesDiv.innerHTML = '';
+      frames.forEach((frame, i) => {
+        const div = document.createElement('div');
+        div.className = 'frame' + (i === activeFrameIndex ? ' active' : '');
+        div.textContent = i;
+        div.onclick = () => {
+          saveCurrentFrameLayer();
+          activeFrameIndex = i;
+          renderFrames();
+          loadFrameToCanvas();
+        };
+        framesDiv.appendChild(div);
+      });
+    }
+
+    function saveCurrentFrameLayer() {
+      const frame = frames[activeFrameIndex];
+      if (!frame) return;
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      frame.layersData[activeLayerIndex] = imgData;
+    }
+
+    function loadFrameToCanvas() {
+      clearCanvas();
+      const frame = frames[activeFrameIndex];
+      if (!frame) return;
+      frame.layersData.forEach((imgData) => {
+        if (imgData) ctx.putImageData(imgData, 0, 0);
+      });
+    }
+
+    // ===== CANVAS DRAWING =====
+    canvas.addEventListener('mousedown', (e) => {
+      drawing = true;
+      draw(e);
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!drawing) return;
+      draw(e);
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      drawing = false;
+      saveCurrentFrameLayer();
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      drawing = false;
+    });
+
+    function getCanvasPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+    }
+
+    function draw(e) {
+      const pos = getCanvasPos(e);
+      if (currentTool === 'brush') {
+        ctx.fillStyle = brushColor;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, brushSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (currentTool === 'erase') {
+        ctx.clearRect(pos.x - brushSize / 2, pos.y - brushSize / 2, brushSize, brushSize);
+      }
+    }
+
+    function clearCanvas() {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // ===== TOOLBAR EVENTS =====
+    document.getElementById('brush-tool').onclick = () => {
+      currentTool = 'brush';
+    };
+
+    document.getElementById('erase-tool').onclick = () => {
+      currentTool = 'erase';
+    };
+
+    document.getElementById('brush-size').oninput = (e) => {
+      brushSize = parseInt(e.target.value, 10);
+    };
+
+    document.getElementById('brush-color').oninput = (e) => {
+      brushColor = e.target.value;
+    };
+
+    document.getElementById('add-layer').onclick = () => {
+      saveCurrentFrameLayer();
+      addLayer();
+      // expand existing frames to have new layer slot
+      frames.forEach((frame) => {
+        frame.layersData.push(null);
+      });
+    };
+
+    document.getElementById('add-frame').onclick = () => {
+      saveCurrentFrameLayer();
+      addFrame();
+    };
+
+    // ===== PLAYBACK =====
+    document.getElementById('play').onclick = () => {
+      if (playing || frames.length === 0) return;
+      playing = true;
+      const fpsInput = document.getElementById('fps');
+      let fps = parseInt(fpsInput.value, 10);
+      if (isNaN(fps) || fps <= 0) fps = 12;
+
+      let index = 0;
+      playInterval = setInterval(() => {
+        activeFrameIndex = index;
+        renderFrames();
+        loadFrameToCanvas();
+        index = (index + 1) % frames.length;
+      }, 1000 / fps);
+    };
+
+    document.getElementById('stop').onclick = () => {
+      playing = false;
+      if (playInterval) clearInterval(playInterval);
+      playInterval = null;
+    };
+
+    function renderUI() {
+      renderLayers();
+      renderFrames();
+    }
+
+    init();
+  </script>
+</body>
+</html>
