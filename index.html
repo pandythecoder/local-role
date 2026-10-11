@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Oliver Anime Studio</title>
+<title>Oliver Anime Studio — FIXED</title>
 
 <style>
   body {
@@ -15,13 +15,11 @@
     overflow: hidden;
   }
 
-  /* LEFT PANEL: CANVAS + TOOLBAR */
   #left {
     flex: 3;
     display: flex;
     flex-direction: column;
     padding: 10px;
-    box-sizing: border-box;
   }
 
   #toolbar {
@@ -43,7 +41,7 @@
   #canvas-area {
     flex: 1;
     border: 1px solid #333;
-    background: #111;
+    background: #181818;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -51,27 +49,15 @@
 
   canvas {
     background: #222;
+    border: 1px solid #444;
   }
 
-  /* RIGHT PANEL: LAYERS + TIMELINE */
   #right {
     flex: 2;
     display: flex;
     flex-direction: column;
     padding: 10px;
     border-left: 1px solid #333;
-    box-sizing: border-box;
-  }
-
-  #layers {
-    margin-bottom: 10px;
-  }
-
-  #layers h2, #timeline h2 {
-    margin: 0 0 5px 0;
-    font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
   }
 
   #layer-list {
@@ -99,15 +85,9 @@
     flex: 1;
     background: #181818;
     border: 1px solid #333;
+    margin-top: 10px;
     display: flex;
     flex-direction: column;
-  }
-
-  #timeline-controls {
-    padding: 5px;
-    border-bottom: 1px solid #333;
-    display: flex;
-    gap: 10px;
   }
 
   #frames {
@@ -139,13 +119,9 @@
 
 <body>
 
-<!-- LEFT SIDE -->
 <div id="left">
 
-  <!-- TOOLBAR -->
   <div id="toolbar">
-
-    <!-- Drawing tools -->
     <button data-tool="pencil">Pencil</button>
     <button data-tool="pen">Pen</button>
     <button data-tool="marker">Marker</button>
@@ -155,14 +131,8 @@
     <button data-tool="smudge">Smudge</button>
     <button data-tool="fill">Fill</button>
 
-    <!-- Shapes -->
-    <button data-tool="line">Line</button>
-    <button data-tool="rect">Rect</button>
-    <button data-tool="circle">Circle</button>
-
-    <!-- Modes -->
     <select id="mode">
-      <option value="normal">Normal</option>
+      <option value="source-over">Normal</option>
       <option value="anime">Anime Mode</option>
       <option value="paint">Painting Mode</option>
       <option value="effects">Effects Mode</option>
@@ -171,6 +141,287 @@
       <option value="overlay">Overlay</option>
     </select>
 
-    <!-- Brush settings -->
     <label>Size:
       <input type="range" id="size" min="1" max="60" value="8">
+    </label>
+
+    <label>Color:
+      <input type="color" id="color" value="#ffffff">
+    </label>
+  </div>
+
+  <div id="canvas-area">
+    <canvas id="canvas" width="900" height="500"></canvas>
+  </div>
+
+</div>
+
+<div id="right">
+  <h2>Layers</h2>
+  <div id="layer-list"></div>
+  <button id="add-layer">+ Add Layer</button>
+
+  <div id="timeline">
+    <div id="timeline-controls">
+      <button id="add-frame">+ Frame</button>
+      <button id="play">Play</button>
+      <button id="stop">Stop</button>
+      <span>FPS:
+        <input type="number" id="fps" value="12" min="1" max="60" style="width:50px;">
+      </span>
+    </div>
+    <div id="frames"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   STATE
+============================================================ */
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let tool = "pencil";
+let mode = "source-over";
+let size = 8;
+let color = "#ffffff";
+
+let drawing = false;
+let lastX = 0;
+let lastY = 0;
+
+let layers = [];
+let activeLayer = 0;
+
+let frames = [];
+let activeFrame = 0;
+
+/* ============================================================
+   INIT
+============================================================ */
+function init() {
+  addLayer();
+  addFrame();
+  renderLayers();
+  renderFrames();
+  clearCanvas();
+}
+
+function clearCanvas() {
+  ctx.fillStyle = "#222";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+/* ============================================================
+   LAYERS
+============================================================ */
+function addLayer() {
+  layers.push({ name: "Layer " + (layers.length + 1) });
+  activeLayer = layers.length - 1;
+
+  frames.forEach(f => f.layersData.push(null));
+  renderLayers();
+}
+
+function renderLayers() {
+  const list = document.getElementById("layer-list");
+  list.innerHTML = "";
+
+  layers.forEach((layer, i) => {
+    const div = document.createElement("div");
+    div.className = "layer" + (i === activeLayer ? " active" : "");
+    div.textContent = layer.name;
+    div.onclick = () => {
+      activeLayer = i;
+      renderLayers();
+    };
+    list.appendChild(div);
+  });
+}
+
+/* ============================================================
+   FRAMES
+============================================================ */
+function addFrame() {
+  frames.push({
+    layersData: layers.map(() => null)
+  });
+  activeFrame = frames.length - 1;
+  renderFrames();
+  loadFrame();
+}
+
+function renderFrames() {
+  const f = document.getElementById("frames");
+  f.innerHTML = "";
+
+  frames.forEach((frame, i) => {
+    const div = document.createElement("div");
+    div.className = "frame" + (i === activeFrame ? " active" : "");
+    div.textContent = i;
+    div.onclick = () => {
+      saveFrame();
+      activeFrame = i;
+      renderFrames();
+      loadFrame();
+    };
+    f.appendChild(div);
+  });
+}
+
+function saveFrame() {
+  const frame = frames[activeFrame];
+  frame.layersData[activeLayer] = ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+function loadFrame() {
+  clearCanvas();
+  const frame = frames[activeFrame];
+  frame.layersData.forEach(img => {
+    if (img) ctx.putImageData(img, 0, 0);
+  });
+}
+
+/* ============================================================
+   DRAWING
+============================================================ */
+canvas.addEventListener("mousedown", e => {
+  drawing = true;
+  const p = getPos(e);
+  lastX = p.x;
+  lastY = p.y;
+});
+
+canvas.addEventListener("mousemove", e => {
+  if (!drawing) return;
+  draw(e);
+});
+
+canvas.addEventListener("mouseup", () => {
+  drawing = false;
+  saveFrame();
+});
+
+canvas.addEventListener("mouseleave", () => {
+  drawing = false;
+});
+
+function getPos(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+function draw(e) {
+  const p = getPos(e);
+
+  ctx.globalCompositeOperation = mode;
+
+  switch (tool) {
+    case "pencil":
+      ctx.fillStyle = color;
+      ctx.fillRect(p.x, p.y, size, size);
+      break;
+
+    case "pen":
+      ctx.strokeStyle = color;
+      ctx.lineWidth = size;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      break;
+
+    case "marker":
+      ctx.fillStyle = color + "88";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+
+    case "airbrush":
+      ctx.fillStyle = color + "33";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size * 2, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+
+    case "glow":
+      ctx.shadowColor = color;
+      ctx.shadowBlur = size * 2;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      break;
+
+    case "shade":
+      ctx.globalCompositeOperation = "multiply";
+      ctx.fillStyle = "#00000055";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+
+    case "smudge":
+      const img = ctx.getImageData(p.x - size, p.y - size, size * 2, size * 2);
+      ctx.putImageData(img, p.x - size + 2, p.y - size + 2);
+      break;
+
+    case "fill":
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      break;
+  }
+
+  lastX = p.x;
+  lastY = p.y;
+}
+
+/* ============================================================
+   TOOLBAR EVENTS
+============================================================ */
+document.querySelectorAll("[data-tool]").forEach(btn => {
+  btn.onclick = () => tool = btn.dataset.tool;
+});
+
+document.getElementById("mode").onchange = e => mode = e.target.value;
+document.getElementById("size").oninput = e => size = parseInt(e.target.value);
+document.getElementById("color").oninput = e => color = e.target.value;
+
+document.getElementById("add-layer").onclick = () => {
+  saveFrame();
+  addLayer();
+};
+
+document.getElementById("add-frame").onclick = () => {
+  saveFrame();
+  addFrame();
+};
+
+/* ============================================================
+   PLAYBACK
+============================================================ */
+document.getElementById("play").onclick = () => {
+  let fps = parseInt(document.getElementById("fps").value);
+  if (!fps || fps < 1) fps = 12;
+
+  let i = 0;
+  playInterval = setInterval(() => {
+    activeFrame = i;
+    renderFrames();
+    loadFrame();
+    i = (i + 1) % frames.length;
+  }, 1000 / fps);
+};
+
+document.getElementById("stop").onclick = () => {
+  clearInterval(playInterval);
+};
+
+init();
+</script>
+
+</body>
+</html>
